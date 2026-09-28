@@ -46,6 +46,10 @@ namespace VarnPythonTools
 
 	TArray<FRoot> GatherRoots()
 	{
+		const UVarnPythonToolsSettings* Settings = GetDefault<UVarnPythonToolsSettings>();
+		const bool bIncludeEngine = Settings->bIncludeEngineScripts;
+		const FString EngineDir = NormalizePath(FPaths::EngineDir());
+
 		TArray<FRoot> Roots;
 		TSet<FString> Seen;
 		auto Add = [&Roots, &Seen](const FString& Path, const FString& Label)
@@ -82,10 +86,35 @@ namespace VarnPythonTools
 			});
 		for (const TSharedRef<IPlugin>& Plugin : Plugins)
 		{
+			const bool bIsThisPlugin = Plugin->GetName() == TEXT("VarnPythonTools");
+			if (!bIncludeEngine && IsPathUnderDirectory(NormalizePath(Plugin->GetBaseDir()), EngineDir)
+				&& !(bIsThisPlugin && Settings->bAlwaysIncludeVarnPythonScripts))
+			{
+				continue;
+			}
 			Add(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Content/Python")), Plugin->GetName());
 		}
-		Add(FPaths::Combine(FPaths::EngineContentDir(), TEXT("Python")), TEXT("Engine"));
+		if (bIncludeEngine)
+		{
+			Add(FPaths::Combine(FPaths::EngineContentDir(), TEXT("Python")), TEXT("Engine"));
+		}
 		return Roots;
+	}
+
+	bool IsIgnored(const FString& Filename, const TArray<FString>& IgnoredDirs, const TSet<FString>& IgnoredFiles)
+	{
+		if (IgnoredFiles.Contains(PathKey(Filename)))
+		{
+			return true;
+		}
+		for (const FString& Directory : IgnoredDirs)
+		{
+			if (IsPathUnderDirectory(Filename, Directory))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 }
 
@@ -152,6 +181,25 @@ void SVarnPythonBrowser::RefreshScripts()
 	AllScripts.Reset();
 	TSet<FString> SeenFiles;
 	FString RootDescription;
+
+	const UVarnPythonToolsSettings* Settings = GetDefault<UVarnPythonToolsSettings>();
+	TArray<FString> IgnoredDirs;
+	for (const FDirectoryPath& Directory : Settings->IgnoredDirectories)
+	{
+		if (!Directory.Path.IsEmpty())
+		{
+			IgnoredDirs.Add(VarnPythonTools::NormalizePath(Directory.Path));
+		}
+	}
+	TSet<FString> IgnoredFiles;
+	for (const FFilePath& File : Settings->IgnoredFiles)
+	{
+		if (!File.FilePath.IsEmpty())
+		{
+			IgnoredFiles.Add(VarnPythonTools::PathKey(VarnPythonTools::NormalizePath(File.FilePath)));
+		}
+	}
+
 	for (const VarnPythonTools::FRoot& Root : VarnPythonTools::GatherRoots())
 	{
 		const bool bExists = IFileManager::Get().DirectoryExists(*Root.Path);
@@ -172,6 +220,10 @@ void SVarnPythonBrowser::RefreshScripts()
 			if (BaseName.Equals(TEXT("__init__.py"), ESearchCase::IgnoreCase) || BaseName.Equals(TEXT("init_unreal.py"), ESearchCase::IgnoreCase))
 			{
 				continue; // Package initializers and editor startup hooks aren't launcher entries.
+			}
+			if (VarnPythonTools::IsIgnored(Filename, IgnoredDirs, IgnoredFiles))
+			{
+				continue;
 			}
 
 			const FString Key = VarnPythonTools::PathKey(Filename);

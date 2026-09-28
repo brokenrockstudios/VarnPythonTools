@@ -33,6 +33,19 @@ Click **Settings**, or visit **Editor Preferences > Plugins > Varn Python Browse
 and add entries under **Additional Script Directories**. Absolute paths are
 recommended; Click **Refresh** after changing folders or adding/deleting scripts. Reopening the panel also scans.
 
+### Filtering
+
+Under **Editor Preferences > Plugins > Varn Python Browser > Filtering**:
+
+- **Include Engine Scripts** (default on): turn off to skip `Engine/Content/Python`
+  and all plugins that live under the engine directory.
+- **Always Include Varn Python Scripts** (default on): exception for this plugin, so
+  its own `Content/Python` stays listed when installed under the engine directory.
+- **Ignored Directories**: scripts anywhere under these folders are hidden.
+- **Ignored Files**: individual scripts to hide.
+
+Relative paths resolve against the project directory. Click **Refresh** after changing them.
+
 Folders need not exist; missing folders are skipped and never created by the browser.
 Hover over the script count to see all resolved search locations.
 Overlapping roots do not duplicate the same normalized absolute filename.

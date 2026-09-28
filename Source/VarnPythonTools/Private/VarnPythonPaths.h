@@ -24,6 +24,15 @@ namespace VarnPythonTools
 		return Result;
 	}
 
+	/** True if Path is the same as, or nested under, Directory. Both must be normalized. */
+	inline bool IsPathUnderDirectory(const FString& Path, const FString& Directory)
+	{
+		FString Prefix = Directory;
+		FPaths::NormalizeDirectoryName(Prefix);
+		Prefix += TEXT("/");
+		return Path.StartsWith(Prefix, ESearchCase::IgnoreCase);
+	}
+
 	inline bool IsSupportedScriptPath(const FString& Filename)
 	{
 		// UE 5.8 parses the first case-sensitive ".py" as the filename end.

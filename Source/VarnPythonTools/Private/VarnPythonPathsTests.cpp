@@ -30,6 +30,9 @@ bool FVarnPythonPathsTest::RunTest(const FString& Parameters)
 			NormalizePath(TEXT("Content/Python/example.py")),
 			FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), TEXT("Content/Python/example.py"))));
 
+	TestTrue(TEXT("Nested path is under directory"), IsPathUnderDirectory(TEXT("C:/Tools/Sub/a.py"), TEXT("C:/tools/")));
+	TestFalse(TEXT("Sibling with shared prefix is not under directory"), IsPathUnderDirectory(TEXT("C:/ToolsExtra/a.py"), TEXT("C:/Tools")));
+
 	TestTrue(TEXT("Spaces in paths are supported"), IsSupportedScriptPath(TEXT("C:/My Tools/example.py")));
 	TestTrue(TEXT("UNC paths are supported"), IsSupportedScriptPath(TEXT("//server/share/example.py")));
 	TestFalse(TEXT("An earlier .py in a directory is ambiguous"), IsSupportedScriptPath(TEXT("C:/tools.python/example.py")));
