@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "Varn Python Tools",
+	"Description": "Browse and run Python scripts.",
+	"Category": "Editor",
+	"CreatedBy": "Broken Rock Studios",
+	"CanContainContent": true,
+	"Modules": [
+		{
+			"Name": "VarnPythonTools",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		}
+	]
+}
