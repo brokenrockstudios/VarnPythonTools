@@ -12,6 +12,9 @@ struct FVarnPythonBrowserScript
 	FString DisplayName;
 	FString Source;
 	FString RelativePath;
+	// Module docstring, read lazily the first time the info tooltip is shown.
+	FString Description;
+	bool bDescriptionLoaded = false;
 };
 
 using FVarnPythonBrowserScriptPtr = TSharedPtr<FVarnPythonBrowserScript>;

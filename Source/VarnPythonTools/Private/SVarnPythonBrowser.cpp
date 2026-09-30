@@ -9,6 +9,7 @@
 #include "VarnPythonPaths.h"
 #include "VarnPythonToolsSettings.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
@@ -115,6 +116,89 @@ namespace VarnPythonTools
 			}
 		}
 		return false;
+	}
+
+	// Extracts the leading triple-quoted module docstring, or returns an empty string if there isn't one.
+	FString ReadModuleDocstring(const FString& Filename)
+	{
+		FString Source;
+		if (!FFileHelper::LoadFileToString(Source, *Filename))
+		{
+			return FString();
+		}
+
+		int32 Pos = 0;
+		const int32 Len = Source.Len();
+		// Skip BOM, blank lines, and leading # comments (shebang, encoding, license headers).
+		while (Pos < Len)
+		{
+			const TCHAR C = Source[Pos];
+			if (C == 0xFEFF || FChar::IsWhitespace(C))
+			{
+				++Pos;
+			}
+			else if (C == TEXT('#'))
+			{
+				while (Pos < Len && Source[Pos] != TEXT('\n'))
+				{
+					++Pos;
+				}
+			}
+			else
+			{
+				break;
+			}
+		}
+
+		// Optional string prefix (r, u, R, U).
+		if (Pos < Len && (FChar::ToLower(Source[Pos]) == TEXT('r') || FChar::ToLower(Source[Pos]) == TEXT('u')))
+		{
+			++Pos;
+		}
+
+		const FStringView Rest = FStringView(Source).RightChop(Pos);
+		FStringView Quote;
+		if (Rest.StartsWith(TEXT("\"\"\"")))
+		{
+			Quote = TEXTVIEW("\"\"\"");
+		}
+		else if (Rest.StartsWith(TEXT("'''")))
+		{
+			Quote = TEXTVIEW("'''");
+		}
+		else
+		{
+			return FString();
+		}
+
+		const FStringView Body = Rest.RightChop(3);
+		const int32 End = Body.Find(Quote);
+		FString Docstring = FString(End == INDEX_NONE ? Body : Body.Left(End));
+		Docstring.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+		Docstring.TrimStartAndEndInline();
+
+		constexpr int32 MaxLength = 1500;
+		if (Docstring.Len() > MaxLength)
+		{
+			Docstring = Docstring.Left(MaxLength).TrimEnd() + TEXT("...");
+		}
+		return Docstring;
+	}
+
+	FText GetScriptInfoTooltip(const FVarnPythonBrowserScriptPtr& Script)
+	{
+		if (!Script->bDescriptionLoaded)
+		{
+			Script->Description = ReadModuleDocstring(Script->Filename);
+			Script->bDescriptionLoaded = true;
+		}
+		if (Script->Description.IsEmpty())
+		{
+			return FText::Format(
+				LOCTEXT("NoDescription", "{0}\n\nNo description available (no triple-quoted docstring at the top of the script)."),
+				FText::FromString(Script->DisplayName));
+		}
+		return FText::FromString(Script->Description);
 	}
 }
 
@@ -296,6 +380,13 @@ TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPt
 					.ToolTipText(FText::FromString(Script->Filename))
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			[
+				SNew(SImage)
+				.Image(FAppStyle::GetBrush("Icons.Info"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.ToolTipText_Lambda([Script] { return VarnPythonTools::GetScriptInfoTooltip(Script); })
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[

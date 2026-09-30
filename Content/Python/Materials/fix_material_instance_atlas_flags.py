@@ -37,7 +37,7 @@ def curve_and_atlas(param, text):
         atlas_data = param.get_editor_property("atlas_data")
         return (str(atlas_data.get_editor_property("curve")),
                 str(atlas_data.get_editor_property("atlas")))
-    except Exception:
+    except Exception:  # atlas_data isn't exposed to Python on some versions; parse the struct text instead
         return ("None" if "Curve=None" in text else "set?",
                 "None" if "Atlas=None" in text else "set?")
 
@@ -67,12 +67,13 @@ def fix_instance(mi):
                 name, value, curve, atlas, "FIX" if do_fix else "skip", reason))
         if not do_fix:
             continue
+        # The flag isn't settable directly, so round-trip the struct through its text form.
         assert p.import_text(text.replace(FLAG_TRUE, FLAG_FALSE)), \
             "Could not update parameter " + name
-        p.parameter_value = value
+        p.parameter_value = value  # import_text can reset the value, so restore it
         fixed += 1
 
-    if fixed and not DRY_RUN:
+    if fixed and not DRY_RUN:  # write back once per instance, undoable as a single step
         with unreal.ScopedEditorTransaction("Fix scalar atlas flags"):
             mi.modify()
             mi.set_editor_property("scalar_parameter_values", params)
