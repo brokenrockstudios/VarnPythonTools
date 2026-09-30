@@ -6,12 +6,11 @@
 #include "IPythonScriptPlugin.h"
 #include "ISettingsModule.h"
 #include "PythonScriptTypes.h"
+#include "VarnPythonScriptSources.h"
 #include "VarnPythonPaths.h"
 #include "VarnPythonToolsSettings.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
-#include "HAL/PlatformProcess.h"
-#include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "Styling/AppStyle.h"
@@ -32,95 +31,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogVarnPython, Log, All);
 
 namespace VarnPythonTools
 {
-	struct FRoot
-	{
-		FString Path;
-		FString Label;
-	};
-
-	FString PathKey(const FString& Path)
-	{
-		// Windows paths are case-insensitive; preserve case on other platforms.
-#if PLATFORM_WINDOWS
-		return Path.ToLower();
-#else
-		return Path;
-#endif
-	}
-
-	TArray<FRoot> GatherRoots()
-	{
-		const UVarnPythonToolsSettings* Settings = GetDefault<UVarnPythonToolsSettings>();
-		const bool bIncludeEngine = Settings->bIncludeEngineScripts;
-		const FString EngineDir = NormalizePath(FPaths::EngineDir());
-
-		TArray<FRoot> Roots;
-		TSet<FString> Seen;
-		auto Add = [&Roots, &Seen](const FString& Path, const FString& Label)
-		{
-			if (Path.IsEmpty())
-			{
-				return;
-			}
-			FString Normalized = NormalizePath(Path);
-			FPaths::NormalizeDirectoryName(Normalized);
-			const FString Key = PathKey(Normalized);
-			if (!Seen.Contains(Key))
-			{
-				Seen.Add(Key);
-				Roots.Add({Normalized, Label});
-			}
-		};
-
-		Add(FPaths::Combine(FPaths::ProjectContentDir(), TEXT("Python")), TEXT("Project"));
-		Add(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Python")), TEXT("Local project"));
-		Add(FPaths::Combine(FPlatformProcess::UserDir(), TEXT("Unreal Projects/Python")), TEXT("User (Unreal Projects)"));
-		Add(FPaths::Combine(FPlatformProcess::UserDir(), TEXT("UnrealEngine/Python")), TEXT("User (UnrealEngine)"));
-
-		for (const FDirectoryPath& Directory : GetDefault<UVarnPythonToolsSettings>()->AdditionalScriptDirectories)
-		{
-			Add(Directory.Path, TEXT("Personal"));
-		}
-
-		TArray<TSharedRef<IPlugin>> Plugins = IPluginManager::Get().GetEnabledPlugins();
-		Plugins.Sort(
-			[](const TSharedRef<IPlugin>& A, const TSharedRef<IPlugin>& B)
-			{
-				return A->GetName() < B->GetName();
-			});
-		for (const TSharedRef<IPlugin>& Plugin : Plugins)
-		{
-			const bool bIsThisPlugin = Plugin->GetName() == TEXT("VarnPythonTools");
-			if (!bIncludeEngine && IsPathUnderDirectory(NormalizePath(Plugin->GetBaseDir()), EngineDir)
-				&& !(bIsThisPlugin && Settings->bAlwaysIncludeVarnPythonScripts))
-			{
-				continue;
-			}
-			Add(FPaths::Combine(Plugin->GetBaseDir(), TEXT("Content/Python")), Plugin->GetName());
-		}
-		if (bIncludeEngine)
-		{
-			Add(FPaths::Combine(FPaths::EngineContentDir(), TEXT("Python")), TEXT("Engine"));
-		}
-		return Roots;
-	}
-
-	bool IsIgnored(const FString& Filename, const TArray<FString>& IgnoredDirs, const TSet<FString>& IgnoredFiles)
-	{
-		if (IgnoredFiles.Contains(PathKey(Filename)))
-		{
-			return true;
-		}
-		for (const FString& Directory : IgnoredDirs)
-		{
-			if (IsPathUnderDirectory(Filename, Directory))
-			{
-				return true;
-			}
-		}
-		return false;
-	}
-
 	// Extracts the leading triple-quoted module docstring, or returns an empty string if there isn't one.
 	FString ReadModuleDocstring(const FString& Filename)
 	{
@@ -267,72 +177,35 @@ void SVarnPythonBrowser::Construct(const FArguments& InArgs)
 void SVarnPythonBrowser::RefreshScripts()
 {
 	AllScripts.Reset();
-	TSet<FString> SeenFiles;
 	FString RootDescription;
 
 	const UVarnPythonToolsSettings* Settings = GetDefault<UVarnPythonToolsSettings>();
-	TArray<FString> IgnoredDirs;
-	for (const FDirectoryPath& Directory : Settings->IgnoredDirectories)
+	const TArray<VarnPythonTools::FRoot> Roots = VarnPythonTools::GatherRoots();
+	for (const VarnPythonTools::FRoot& Root : Roots)
 	{
-		if (!Directory.Path.IsEmpty())
-		{
-			IgnoredDirs.Add(VarnPythonTools::NormalizePath(Directory.Path));
-		}
-	}
-	TSet<FString> IgnoredFiles;
-	for (const FFilePath& File : Settings->IgnoredFiles)
-	{
-		if (!File.FilePath.IsEmpty())
-		{
-			IgnoredFiles.Add(VarnPythonTools::PathKey(VarnPythonTools::NormalizePath(File.FilePath)));
-		}
-	}
-
-	for (const VarnPythonTools::FRoot& Root : VarnPythonTools::GatherRoots())
-	{
-		const bool bExists = IFileManager::Get().DirectoryExists(*Root.Path);
 		RootDescription += FString::Printf(
 			TEXT("%s: %s%s\n"), *Root.Label, *Root.Path,
-			bExists ? TEXT("") : TEXT(" (not created)"));
-		if (!bExists)
+			IFileManager::Get().DirectoryExists(*Root.Path) ? TEXT("") : TEXT(" (not created)"));
+	}
+
+	for (const VarnPythonTools::FScriptFile& File : VarnPythonTools::FindScriptFiles(Roots))
+	{
+		const FString BaseName = FPaths::GetCleanFilename(File.Filename);
+		if (BaseName.Equals(TEXT("__init__.py"), ESearchCase::IgnoreCase) || BaseName.Equals(TEXT("init_unreal.py"), ESearchCase::IgnoreCase))
 		{
-			continue;
+			continue; // Package initializers and editor startup hooks aren't launcher entries.
 		}
 
-		TArray<FString> Files;
-		IFileManager::Get().FindFilesRecursive(Files, *Root.Path, TEXT("*.py"), true, false);
-		for (const FString& File : Files)
+		FVarnPythonBrowserScriptPtr Script = MakeShared<FVarnPythonBrowserScript>();
+		Script->Filename = File.Filename;
+		Script->DisplayName = BaseName;
+		Script->Source = File.RootLabel;
+		Script->RelativePath = File.RelativePath;
+		if (const FString* SavedArguments = Settings->ScriptArguments.Find(VarnPythonTools::PathKey(File.Filename)))
 		{
-			const FString Filename = VarnPythonTools::NormalizePath(File);
-			const FString BaseName = FPaths::GetCleanFilename(Filename);
-			if (BaseName.Equals(TEXT("__init__.py"), ESearchCase::IgnoreCase) || BaseName.Equals(TEXT("init_unreal.py"), ESearchCase::IgnoreCase))
-			{
-				continue; // Package initializers and editor startup hooks aren't launcher entries.
-			}
-			if (VarnPythonTools::IsIgnored(Filename, IgnoredDirs, IgnoredFiles))
-			{
-				continue;
-			}
-
-			const FString Key = VarnPythonTools::PathKey(Filename);
-			if (SeenFiles.Contains(Key))
-			{
-				continue;
-			}
-			SeenFiles.Add(Key);
-
-			FVarnPythonBrowserScriptPtr Script = MakeShared<FVarnPythonBrowserScript>();
-			Script->Filename = Filename;
-			Script->DisplayName = BaseName;
-			Script->Source = Root.Label;
-			Script->RelativePath = Filename;
-			FPaths::MakePathRelativeTo(Script->RelativePath, *(Root.Path + TEXT("/")));
-			if (const FString* SavedArguments = Settings->ScriptArguments.Find(VarnPythonTools::PathKey(Filename)))
-			{
-				Script->Arguments = *SavedArguments;
-			}
-			AllScripts.Add(MoveTemp(Script));
+			Script->Arguments = *SavedArguments;
 		}
+		AllScripts.Add(MoveTemp(Script));
 	}
 	RootsTooltip = FText::FromString(RootDescription);
 	AllScripts.Sort(

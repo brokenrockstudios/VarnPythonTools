@@ -16,6 +16,23 @@ full-path tooltips, and a last-run status.
 
 A C++ toolchain is required; this download does not contain precompiled binaries.
 
+## Python Editor
+
+**Window > Python Editor** opens a separate, dockable window with a folder view of your
+scripts on the left and one tab per opened script on the right.
+
+- Double-click a script to open it in a tab; double-click it again to focus that tab and
+  re-read the file. Double-click a folder to expand or collapse it.
+- Tabs are standard editor document tabs: close, reorder, or drag them out into their own window.
+- The tree uses the same search locations and filtering as the browser (below), grouped by
+  location and then by folder. The search box filters by path; the refresh button rescans.
+- Scripts open read-only for now (line numbers, selectable text). Unlike the browser, the tree
+  also lists `__init__.py` and `init_unreal.py`, since those are files you may want to read.
+- Python syntax coloring covers keywords, strings (including triple-quoted), comments, numbers,
+  decorators, function and class names, calls, attributes after a dot, and `self`/`cls`. It is
+  lexical only: plain variables stay uncolored, and invalid code never breaks it. Files over
+  200 KB open without coloring, and files over 2 MB are not displayed.
+
 ## Search locations
 
 The browser recursively discovers `.py` files in these roots:
