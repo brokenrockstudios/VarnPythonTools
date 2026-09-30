@@ -36,5 +36,9 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Filtering", meta = (RelativePath, FilePathFilter = "py"))
 	TArray<FFilePath> IgnoredFiles;
 
+	/** Per-script run arguments, keyed by normalized script path. Edited from the browser's right-click menu, not shown in settings. */
+	UPROPERTY(Config)
+	TMap<FString, FString> ScriptArguments;
+
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 };

@@ -18,7 +18,10 @@
 #include "Templates/UnrealTemplate.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Images/SImage.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
@@ -239,7 +242,8 @@ void SVarnPythonBrowser::Construct(const FArguments& InArgs)
 			[
 				SAssignNew(ScriptList, SListView<FVarnPythonBrowserScriptPtr>)
 				.ListItemsSource(&FilteredScripts)
-				.SelectionMode(ESelectionMode::None)
+				.SelectionMode(ESelectionMode::Single) // Single so a right-click selects the row the context menu applies to.
+				.OnContextMenuOpening(this, &SVarnPythonBrowser::OnContextMenuOpening)
 				.OnGenerateRow(this, &SVarnPythonBrowser::GenerateRow)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
@@ -323,6 +327,10 @@ void SVarnPythonBrowser::RefreshScripts()
 			Script->Source = Root.Label;
 			Script->RelativePath = Filename;
 			FPaths::MakePathRelativeTo(Script->RelativePath, *(Root.Path + TEXT("/")));
+			if (const FString* SavedArguments = Settings->ScriptArguments.Find(VarnPythonTools::PathKey(Filename)))
+			{
+				Script->Arguments = *SavedArguments;
+			}
 			AllScripts.Add(MoveTemp(Script));
 		}
 	}
@@ -338,6 +346,7 @@ void SVarnPythonBrowser::RefreshScripts()
 
 void SVarnPythonBrowser::FilterScripts()
 {
+	EditingScript.Reset();
 	FilteredScripts.Reset();
 	for (const FVarnPythonBrowserScriptPtr& Script : AllScripts)
 	{
@@ -360,7 +369,8 @@ void SVarnPythonBrowser::OnSearchChanged(const FText& Text)
 
 TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPtr Script, const TSharedRef<STableViewBase>& Owner)
 {
-	return SNew(STableRow<FVarnPythonBrowserScriptPtr>, Owner)
+	TSharedPtr<SEditableTextBox> ArgumentsBox;
+	TSharedRef<ITableRow> Row = SNew(STableRow<FVarnPythonBrowserScriptPtr>, Owner)
 		.Padding(4)
 		[
 			SNew(SHorizontalBox)
@@ -376,9 +386,21 @@ TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPt
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(STextBlock)
+					.Visibility_Lambda([this, Script] { return EditingScript == Script ? EVisibility::Collapsed : EVisibility::Visible; })
 					.Text(FText::FromString(Script->Source + TEXT(" / ") + Script->RelativePath))
 					.ToolTipText(FText::FromString(Script->Filename))
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
+				[
+					// Replaces the path line while editing; Enter or clicking away saves, Escape cancels.
+					SAssignNew(ArgumentsBox, SEditableTextBox)
+					.Visibility_Lambda([this, Script] { return EditingScript == Script ? EVisibility::Visible : EVisibility::Collapsed; })
+					.Text_Lambda([this] { return ArgumentsEditBuffer; })
+					.OnTextChanged_Lambda([this](const FText& Text) { ArgumentsEditBuffer = Text; })
+					.OnTextCommitted(this, &SVarnPythonBrowser::OnArgumentsCommitted, Script)
+					.HintText(LOCTEXT("ArgumentsHint", "Run arguments, e.g. --dry-run \"some value\""))
+					.SelectAllTextWhenFocused(true)
 				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
@@ -387,6 +409,17 @@ TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPt
 				.Image(FAppStyle::GetBrush("Icons.Info"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				.ToolTipText_Lambda([Script] { return VarnPythonTools::GetScriptInfoTooltip(Script); })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			[
+				SNew(SImage)
+				.Visibility_Lambda([Script] { return Script->Arguments.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+				.Image(FAppStyle::GetBrush("Icons.Settings"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.ToolTipText_Lambda([Script]
+				{
+					return FText::Format(LOCTEXT("ArgumentsTip", "Run arguments:\n{0}\n\nRight-click the script to edit."), FText::FromString(Script->Arguments));
+				})
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
@@ -407,6 +440,8 @@ TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPt
 				]
 			]
 		];
+	Script->ArgumentsEditor = ArgumentsBox;
+	return Row;
 }
 
 bool SVarnPythonBrowser::CanRunScripts() const
@@ -414,6 +449,70 @@ bool SVarnPythonBrowser::CanRunScripts() const
 	IPythonScriptPlugin* Python = IPythonScriptPlugin::Get();
 	return !bRunning && Python && Python->IsPythonAvailable() && Python->IsPythonInitialized()
 		&& GEditor && !GEditor->PlayWorld;
+}
+
+TSharedPtr<SWidget> SVarnPythonBrowser::OnContextMenuOpening()
+{
+	const TArray<FVarnPythonBrowserScriptPtr> Selected = ScriptList->GetSelectedItems();
+	if (Selected.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	FMenuBuilder MenuBuilder(true, nullptr);
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("EditArguments", "Edit Run Arguments..."),
+		LOCTEXT("EditArgumentsTip", "Edit the command-line arguments passed to this script (sys.argv) when it is run."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
+		FUIAction(FExecuteAction::CreateSP(this, &SVarnPythonBrowser::BeginEditArguments, Selected[0])));
+	return MenuBuilder.MakeWidget();
+}
+
+void SVarnPythonBrowser::BeginEditArguments(FVarnPythonBrowserScriptPtr Script)
+{
+	EditingScript = Script;
+	ArgumentsEditBuffer = FText::FromString(Script->Arguments);
+
+	// The editor is collapsed until this frame's visibility pass, so focus it on the next tick.
+	TWeakPtr<SWidget> Editor = Script->ArgumentsEditor;
+	RegisterActiveTimer(0.f, FWidgetActiveTimerDelegate::CreateLambda(
+		[Editor](double, float)
+		{
+			if (TSharedPtr<SWidget> Widget = Editor.Pin())
+			{
+				FSlateApplication::Get().SetKeyboardFocus(Widget, EFocusCause::SetDirectly);
+			}
+			return EActiveTimerReturnType::Stop;
+		}));
+}
+
+void SVarnPythonBrowser::OnArgumentsCommitted(const FText& Text, ETextCommit::Type CommitType, FVarnPythonBrowserScriptPtr Script)
+{
+	// Collapsing the editor fires a second commit from the focus loss; ignore it.
+	if (EditingScript != Script)
+	{
+		return;
+	}
+	EditingScript.Reset();
+	if (CommitType == ETextCommit::OnCleared)
+	{
+		return; // Escape cancels.
+	}
+
+	Script->Arguments = Text.ToString().TrimStartAndEnd();
+	Script->Arguments.ReplaceInline(TEXT("\r"), TEXT(" "));
+	Script->Arguments.ReplaceInline(TEXT("\n"), TEXT(" "));
+	UVarnPythonToolsSettings* Settings = GetMutableDefault<UVarnPythonToolsSettings>();
+	const FString Key = VarnPythonTools::PathKey(Script->Filename);
+	if (Script->Arguments.IsEmpty())
+	{
+		Settings->ScriptArguments.Remove(Key);
+	}
+	else
+	{
+		Settings->ScriptArguments.Add(Key, Script->Arguments);
+	}
+	Settings->SaveConfig();
 }
 
 FReply SVarnPythonBrowser::RunScript(FVarnPythonBrowserScriptPtr Script)
@@ -436,11 +535,16 @@ FReply SVarnPythonBrowser::RunScript(FVarnPythonBrowserScriptPtr Script)
 	}
 
 	TGuardValue<bool> RunningGuard(bRunning, true);
-	UE_LOG(LogVarnPython, Display, TEXT("Running %s"), *Script->Filename);
+	UE_LOG(LogVarnPython, Display, TEXT("Running %s %s"), *Script->Filename, *Script->Arguments);
 	FPythonCommandEx Command;
 	// This is a filename parsed by Unreal, not interpolated Python source.
 	// Quoting the full path preserves spaces; normalized paths use forward slashes.
 	Command.Command = FString::Printf(TEXT("\"%s\""), *Script->Filename);
+	if (!Script->Arguments.IsEmpty())
+	{
+		// ExecuteFile treats everything after the quoted filename as sys.argv[1:].
+		Command.Command += TEXT(" ") + Script->Arguments;
+	}
 	Command.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
 	Command.FileExecutionScope = EPythonFileExecutionScope::Private;
 	const bool bSuccess = IPythonScriptPlugin::Get()->ExecPythonCommandEx(Command);
