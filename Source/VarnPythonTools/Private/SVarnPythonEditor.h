@@ -3,29 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "VarnPythonScriptTree.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/STreeView.h"
 
 class FTabManager;
 class SDockTab;
 
-struct FVarnPythonEditorNode
-{
-	enum class EKind : uint8
-	{
-		Root,
-		Folder,
-		File
-	};
-
-	EKind Kind = EKind::File;
-	FString Name;
-	// Absolute path of the root directory, folder or script.
-	FString Path;
-	TArray<TSharedPtr<FVarnPythonEditorNode>> Children;
-};
-
-using FVarnPythonEditorNodePtr = TSharedPtr<FVarnPythonEditorNode>;
+using FVarnPythonEditorNodePtr = VarnPythonTools::FScriptTreeNodePtr;
 
 /** Script explorer on the left, one dockable tab per opened script on the right. */
 class SVarnPythonEditor : public SCompoundWidget
@@ -43,9 +28,9 @@ public:
 private:
 	TSharedRef<SWidget> MakeExplorerPanel();
 	void RebuildTree();
-	void ApplyExpansion(const TArray<FVarnPythonEditorNodePtr>& Nodes);
 	void OnSearchChanged(const FText& Text);
 	FReply OnRefreshClicked();
+	void ToggleFolderView();
 	TSharedRef<ITableRow> GenerateRow(FVarnPythonEditorNodePtr Node, const TSharedRef<STableViewBase>& Owner);
 	void GetNodeChildren(FVarnPythonEditorNodePtr Node, TArray<FVarnPythonEditorNodePtr>& OutChildren);
 	void OnExpansionChanged(FVarnPythonEditorNodePtr Node, bool bExpanded);
@@ -61,10 +46,8 @@ private:
 	TArray<FVarnPythonEditorNodePtr> RootNodes;
 	// Opened scripts by PathKey, so a second double-click focuses the existing tab.
 	TMap<FString, TWeakPtr<SDockTab>> OpenDocuments;
-	// Expanded folders by PathKey; survives rebuilds, which replace every node.
-	TSet<FString> ExpandedPaths;
-	// Roots already shown once, so only a root's first appearance defaults to expanded.
-	TSet<FString> SeenRootPaths;
+	VarnPythonTools::FScriptTreeExpansion Expansion;
 	FString SearchText;
-	bool bApplyingExpansion = false;
+	// Folder hierarchy when true, a flat list of every script when false.
+	bool bShowHierarchy = true;
 };

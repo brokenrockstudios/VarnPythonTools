@@ -18,6 +18,9 @@ namespace
 {
 	const FName PythonBrowserTabName(TEXT("VarnPythonBrowser"));
 	const FName PythonEditorTabName(TEXT("VarnPythonEditor"));
+	// The engine's terminal-window glyph (the console variables icon). The app style has no Python icon,
+	// and the Python logo is a trademark, so the tab doesn't use it.
+	const FName PythonBrowserIconName(TEXT("MainFrame.BrowseCVars"));
 }
 
 class FVarnPythonToolsModule : public IModuleInterface
@@ -32,9 +35,9 @@ public:
 
 		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(PythonBrowserTabName,
 		                                                  FOnSpawnTab::CreateRaw(this, &FVarnPythonToolsModule::SpawnTab))
-		                        .SetDisplayName(LOCTEXT("Title", "Python Browser"))
+		                        .SetDisplayName(LOCTEXT("Title", "Varn Python Browser"))
 		                        .SetTooltipText(LOCTEXT("TabTip", "Browse and run Python scripts."))
-		                        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Code")))
+		                        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), PythonBrowserIconName))
 		                        .SetMenuType(ETabSpawnerMenuType::Hidden);
 
 		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(PythonEditorTabName,
@@ -47,7 +50,7 @@ public:
 
 		ISettingsModule& Settings = FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings"));
 		Settings.RegisterSettings(TEXT("Editor"), TEXT("Plugins"), TEXT("VarnPythonBrowser"),
-		                          LOCTEXT("SettingsTitle", "Rock Python Browser"),
+		                          LOCTEXT("SettingsTitle", "Varn Python Browser"),
 		                          LOCTEXT("SettingsDescription", "Personal Python script folders for this project. Refresh the browser after editing."),
 		                          GetMutableDefault<UVarnPythonToolsSettings>());
 
@@ -90,9 +93,9 @@ private:
 		UToolMenu* Menu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.MainMenu.Window"));
 		FToolMenuSection& Section = Menu->FindOrAddSection(TEXT("VarnPythonBrowser"), LOCTEXT("Section", "Python"), FToolMenuInsert());
 		Section.AddMenuEntry(PythonBrowserTabName,
-		                     LOCTEXT("Title", "Python Browser"),
+		                     LOCTEXT("Title", "Varn Python Browser"),
 		                     LOCTEXT("MenuTip", "Browse and run Python scripts."),
-		                     FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("Icons.Code")),
+		                     FSlateIcon(FAppStyle::GetAppStyleSetName(), PythonBrowserIconName),
 		                     FUIAction(FExecuteAction::CreateLambda([]
 		                     {
 			                     FGlobalTabmanager::Get()->TryInvokeTab(PythonBrowserTabName);

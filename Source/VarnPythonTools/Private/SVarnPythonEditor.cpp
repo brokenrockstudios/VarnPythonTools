@@ -27,25 +27,7 @@ namespace
 	// Opened scripts dock next to each other; this id only marks where the first one goes.
 	const FName DocumentPlaceholderId(TEXT("VarnPythonDocument"));
 
-	// Folders first, then scripts, each alphabetically.
-	void SortNodes(TArray<FVarnPythonEditorNodePtr>& Nodes)
-	{
-		Nodes.Sort(
-			[](const FVarnPythonEditorNodePtr& A, const FVarnPythonEditorNodePtr& B)
-			{
-				const bool bAIsFile = A->Kind == FVarnPythonEditorNode::EKind::File;
-				const bool bBIsFile = B->Kind == FVarnPythonEditorNode::EKind::File;
-				if (bAIsFile != bBIsFile)
-				{
-					return bBIsFile;
-				}
-				return A->Name.Compare(B->Name, ESearchCase::IgnoreCase) < 0;
-			});
-		for (const FVarnPythonEditorNodePtr& Node : Nodes)
-		{
-			SortNodes(Node->Children);
-		}
-	}
+	using EKind = VarnPythonTools::FScriptTreeNode::EKind;
 }
 
 void SVarnPythonEditor::Construct(const FArguments& InArgs, const TSharedRef<SDockTab>& OwnerTab)
@@ -115,6 +97,12 @@ TSharedRef<SWidget> SVarnPythonEditor::MakeExplorerPanel()
 						.ColorAndOpacity(FSlateColor::UseForeground())
 					]
 				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0, 0, 0)
+				[
+					VarnPythonTools::MakeOptionsMenuButton(
+						FExecuteAction::CreateSP(this, &SVarnPythonEditor::ToggleFolderView),
+						FIsActionChecked::CreateSPLambda(this, [this] { return bShowHierarchy; }))
+				]
 			]
 			+ SVerticalBox::Slot().FillHeight(1)
 			[
@@ -144,103 +132,20 @@ TSharedRef<SWidget> SVarnPythonEditor::MakeExplorerPanel()
 
 void SVarnPythonEditor::RebuildTree()
 {
-	const TArray<VarnPythonTools::FScriptFile> Scripts = VarnPythonTools::FindScriptFiles(VarnPythonTools::GatherRoots());
-
-	// Roots that share a label (several personal folders, say) are told apart by their path.
-	TMap<FString, TSet<FString>> RootPathsByLabel;
-	for (const VarnPythonTools::FScriptFile& Script : Scripts)
+	TArray<VarnPythonTools::FScriptFile> Scripts = VarnPythonTools::FindScriptFiles(VarnPythonTools::GatherRoots());
+	if (!SearchText.IsEmpty())
 	{
-		RootPathsByLabel.FindOrAdd(Script.RootLabel).Add(Script.RootPath);
-	}
-
-	RootNodes.Reset();
-	TMap<FString, FVarnPythonEditorNodePtr> RootsByPath;
-	for (const VarnPythonTools::FScriptFile& Script : Scripts)
-	{
-		if (!SearchText.IsEmpty() && !Script.Filename.Contains(SearchText) && !Script.RootLabel.Contains(SearchText))
-		{
-			continue;
-		}
-
-		FVarnPythonEditorNodePtr Parent = RootsByPath.FindRef(Script.RootPath);
-		if (!Parent.IsValid())
-		{
-			Parent = MakeShared<FVarnPythonEditorNode>();
-			Parent->Kind = FVarnPythonEditorNode::EKind::Root;
-			Parent->Path = Script.RootPath;
-			Parent->Name = RootPathsByLabel.FindChecked(Script.RootLabel).Num() > 1
-				? FString::Printf(TEXT("%s (%s)"), *Script.RootLabel, *Script.RootPath)
-				: Script.RootLabel;
-			RootsByPath.Add(Script.RootPath, Parent);
-			RootNodes.Add(Parent);
-
-			// A root's first appearance is expanded; after that the user's choice sticks.
-			const FString RootKey = VarnPythonTools::PathKey(Script.RootPath);
-			bool bAlreadySeen = false;
-			SeenRootPaths.Add(RootKey, &bAlreadySeen);
-			if (!bAlreadySeen)
+		Scripts.RemoveAll(
+			[this](const VarnPythonTools::FScriptFile& Script)
 			{
-				ExpandedPaths.Add(RootKey);
-			}
-		}
-
-		TArray<FString> Segments;
-		Script.RelativePath.ParseIntoArray(Segments, TEXT("/"));
-		FString NodePath = Script.RootPath;
-		for (int32 Index = 0; Index < Segments.Num(); ++Index)
-		{
-			const FString& Segment = Segments[Index];
-			const bool bIsFile = Index == Segments.Num() - 1;
-			NodePath += TEXT("/") + Segment;
-
-			const FVarnPythonEditorNodePtr* Existing = Parent->Children.FindByPredicate(
-				[&Segment](const FVarnPythonEditorNodePtr& Child)
-				{
-					return Child->Name.Equals(Segment, ESearchCase::CaseSensitive);
-				});
-			if (Existing)
-			{
-				Parent = *Existing;
-				continue;
-			}
-
-			FVarnPythonEditorNodePtr Node = MakeShared<FVarnPythonEditorNode>();
-			Node->Kind = bIsFile ? FVarnPythonEditorNode::EKind::File : FVarnPythonEditorNode::EKind::Folder;
-			Node->Name = Segment;
-			Node->Path = bIsFile ? Script.Filename : NodePath;
-			Parent->Children.Add(Node);
-			Parent = Node;
-		}
-	}
-	for (const FVarnPythonEditorNodePtr& Root : RootNodes)
-	{
-		SortNodes(Root->Children);
+				return !Script.Filename.Contains(SearchText) && !Script.RootLabel.Contains(SearchText);
+			});
 	}
 
-	{
-		// Every node is new, so expansion is reapplied from ExpandedPaths; that must not rewrite ExpandedPaths.
-		TGuardValue<bool> Guard(bApplyingExpansion, true);
-		Tree->ClearExpandedItems();
-		ApplyExpansion(RootNodes);
-	}
+	RootNodes = bShowHierarchy ? VarnPythonTools::BuildScriptTree(Scripts) : VarnPythonTools::BuildScriptList(Scripts);
+	// While searching, open everything so every match is visible.
+	Expansion.Restore(*Tree, RootNodes, !SearchText.IsEmpty());
 	Tree->RequestTreeRefresh();
-}
-
-void SVarnPythonEditor::ApplyExpansion(const TArray<FVarnPythonEditorNodePtr>& Nodes)
-{
-	for (const FVarnPythonEditorNodePtr& Node : Nodes)
-	{
-		if (Node->Children.IsEmpty())
-		{
-			continue;
-		}
-		// While searching, open everything so every match is visible.
-		if (!SearchText.IsEmpty() || ExpandedPaths.Contains(VarnPythonTools::PathKey(Node->Path)))
-		{
-			Tree->SetItemExpansion(Node, true);
-		}
-		ApplyExpansion(Node->Children);
-	}
 }
 
 void SVarnPythonEditor::OnSearchChanged(const FText& Text)
@@ -255,9 +160,15 @@ FReply SVarnPythonEditor::OnRefreshClicked()
 	return FReply::Handled();
 }
 
+void SVarnPythonEditor::ToggleFolderView()
+{
+	bShowHierarchy = !bShowHierarchy;
+	RebuildTree();
+}
+
 TSharedRef<ITableRow> SVarnPythonEditor::GenerateRow(FVarnPythonEditorNodePtr Node, const TSharedRef<STableViewBase>& Owner)
 {
-	const bool bIsRoot = Node->Kind == FVarnPythonEditorNode::EKind::Root;
+	const bool bIsRoot = Node->Kind == EKind::Root;
 	const FTextBlockStyle& TextStyle = FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(
 		bIsRoot ? FName("NormalText.Important") : FName("NormalText"));
 
@@ -274,10 +185,13 @@ TSharedRef<ITableRow> SVarnPythonEditor::GenerateRow(FVarnPythonEditorNodePtr No
 			]
 			+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
 			[
-				SNew(STextBlock)
-				.TextStyle(&TextStyle)
-				.Text(FText::FromString(Node->Name))
-				.HighlightText_Lambda([this] { return FText::FromString(SearchText); })
+				// Only the flat list sets a location; without folders to read it from, it tells same-named scripts apart.
+				VarnPythonTools::MakeNameAndLocation(
+					SNew(STextBlock)
+					.TextStyle(&TextStyle)
+					.Text(FText::FromString(Node->Name))
+					.HighlightText_Lambda([this] { return FText::FromString(SearchText); }),
+					Node->Location)
 			]
 		];
 }
@@ -289,24 +203,12 @@ void SVarnPythonEditor::GetNodeChildren(FVarnPythonEditorNodePtr Node, TArray<FV
 
 void SVarnPythonEditor::OnExpansionChanged(FVarnPythonEditorNodePtr Node, bool bExpanded)
 {
-	if (bApplyingExpansion)
-	{
-		return;
-	}
-	const FString Key = VarnPythonTools::PathKey(Node->Path);
-	if (bExpanded)
-	{
-		ExpandedPaths.Add(Key);
-	}
-	else
-	{
-		ExpandedPaths.Remove(Key);
-	}
+	Expansion.OnExpansionChanged(Node, bExpanded);
 }
 
 void SVarnPythonEditor::OnNodeDoubleClicked(FVarnPythonEditorNodePtr Node)
 {
-	if (Node->Kind == FVarnPythonEditorNode::EKind::File)
+	if (Node->Kind == EKind::File)
 	{
 		OpenDocument(Node->Path);
 	}
@@ -319,7 +221,7 @@ void SVarnPythonEditor::OnNodeDoubleClicked(FVarnPythonEditorNodePtr Node)
 
 const FSlateBrush* SVarnPythonEditor::GetNodeIcon(const FVarnPythonEditorNodePtr& Node) const
 {
-	if (Node->Kind == FVarnPythonEditorNode::EKind::File)
+	if (Node->Kind == EKind::File)
 	{
 		return FAppStyle::GetBrush("MainFrame.OpenSourceCodeEditor");
 	}

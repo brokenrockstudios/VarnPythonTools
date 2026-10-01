@@ -4,7 +4,6 @@
 
 #include "Editor.h"
 #include "IPythonScriptPlugin.h"
-#include "ISettingsModule.h"
 #include "PythonScriptTypes.h"
 #include "VarnPythonScriptSources.h"
 #include "VarnPythonPaths.h"
@@ -24,6 +23,7 @@
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Views/STableRow.h"
 
 #define LOCTEXT_NAMESPACE "VarnPythonBrowser"
 
@@ -132,29 +132,35 @@ void SVarnPythonBrowser::Construct(const FArguments& InArgs)
 					.HintText(LOCTEXT("Search", "Search scripts"))
 					.OnTextChanged(this, &SVarnPythonBrowser::OnSearchChanged)
 				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0, 0, 0)
 				[
 					SNew(SButton)
-					.Text(LOCTEXT("Refresh", "Refresh"))
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 					.ToolTipText(LOCTEXT("RefreshTip", "Rescan script folders. Hover over the script count to see search locations."))
 					.IsEnabled_Lambda([this] { return !bRunning; })
 					.OnClicked(this, &SVarnPythonBrowser::OnRefreshClicked)
+					[
+						SNew(SImage)
+						.Image(FAppStyle::GetBrush("Icons.Refresh"))
+						.ColorAndOpacity(FSlateColor::UseForeground())
+					]
 				]
-				+ SHorizontalBox::Slot().AutoWidth()
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4, 0, 0, 0)
 				[
-					SNew(SButton)
-					.Text(LOCTEXT("Settings", "Settings"))
-					.ToolTipText(LOCTEXT("SettingsTip", "Configure personal script folders in Editor Preferences. Refresh after changing them."))
-					.OnClicked(this, &SVarnPythonBrowser::OnSettingsClicked)
+					VarnPythonTools::MakeOptionsMenuButton(
+						FExecuteAction::CreateSP(this, &SVarnPythonBrowser::ToggleFolderView),
+						FIsActionChecked::CreateSPLambda(this, [this] { return bShowHierarchy; }))
 				]
 			]
 			+ SVerticalBox::Slot().FillHeight(1)
 			[
-				SAssignNew(ScriptList, SListView<FVarnPythonBrowserScriptPtr>)
-				.ListItemsSource(&FilteredScripts)
+				SAssignNew(Tree, STreeView<FVarnPythonBrowserNodePtr>)
+				.TreeItemsSource(&RootNodes)
 				.SelectionMode(ESelectionMode::Single) // Single so a right-click selects the row the context menu applies to.
 				.OnContextMenuOpening(this, &SVarnPythonBrowser::OnContextMenuOpening)
 				.OnGenerateRow(this, &SVarnPythonBrowser::GenerateRow)
+				.OnGetChildren(this, &SVarnPythonBrowser::GetNodeChildren)
+				.OnExpansionChanged(this, &SVarnPythonBrowser::OnExpansionChanged)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 			[
@@ -177,6 +183,7 @@ void SVarnPythonBrowser::Construct(const FArguments& InArgs)
 void SVarnPythonBrowser::RefreshScripts()
 {
 	AllScripts.Reset();
+	ScriptsByKey.Reset();
 	FString RootDescription;
 
 	const UVarnPythonToolsSettings* Settings = GetDefault<UVarnPythonToolsSettings>();
@@ -200,37 +207,38 @@ void SVarnPythonBrowser::RefreshScripts()
 		Script->Filename = File.Filename;
 		Script->DisplayName = BaseName;
 		Script->Source = File.RootLabel;
+		Script->RootPath = File.RootPath;
 		Script->RelativePath = File.RelativePath;
 		if (const FString* SavedArguments = Settings->ScriptArguments.Find(VarnPythonTools::PathKey(File.Filename)))
 		{
 			Script->Arguments = *SavedArguments;
 		}
+		ScriptsByKey.Add(VarnPythonTools::PathKey(File.Filename), Script);
 		AllScripts.Add(MoveTemp(Script));
 	}
 	RootsTooltip = FText::FromString(RootDescription);
-	AllScripts.Sort(
-		[](const FVarnPythonBrowserScriptPtr& A, const FVarnPythonBrowserScriptPtr& B)
-		{
-			const int32 NameOrder = A->DisplayName.Compare(B->DisplayName, ESearchCase::IgnoreCase);
-			return NameOrder == 0 ? A->Filename < B->Filename : NameOrder < 0;
-		});
 	FilterScripts();
 }
 
 void SVarnPythonBrowser::FilterScripts()
 {
 	EditingScript.Reset();
-	FilteredScripts.Reset();
+	TArray<VarnPythonTools::FScriptFile> Shown;
 	for (const FVarnPythonBrowserScriptPtr& Script : AllScripts)
 	{
 		if (SearchText.IsEmpty() || Script->Filename.Contains(SearchText) || Script->Source.Contains(SearchText))
 		{
-			FilteredScripts.Add(Script);
+			Shown.Add({Script->Filename, Script->RootPath, Script->Source, Script->RelativePath});
 		}
 	}
-	if (ScriptList.IsValid())
+	NumShownScripts = Shown.Num();
+
+	RootNodes = bShowHierarchy ? VarnPythonTools::BuildScriptTree(Shown) : VarnPythonTools::BuildScriptList(Shown);
+	if (Tree.IsValid())
 	{
-		ScriptList->RequestListRefresh();
+		// While searching, open everything so every match is visible.
+		Expansion.Restore(*Tree, RootNodes, !SearchText.IsEmpty());
+		Tree->RequestTreeRefresh();
 	}
 }
 
@@ -240,11 +248,18 @@ void SVarnPythonBrowser::OnSearchChanged(const FText& Text)
 	FilterScripts();
 }
 
-TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPtr Script, const TSharedRef<STableViewBase>& Owner)
+TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserNodePtr Node, const TSharedRef<STableViewBase>& Owner)
 {
+	const FVarnPythonBrowserScriptPtr Script = FindScript(Node);
+	if (!Script.IsValid())
+	{
+		return GenerateFolderRow(Node, Owner);
+	}
+
 	TSharedPtr<SEditableTextBox> ArgumentsBox;
-	TSharedRef<ITableRow> Row = SNew(STableRow<FVarnPythonBrowserScriptPtr>, Owner)
+	TSharedRef<ITableRow> Row = SNew(STableRow<FVarnPythonBrowserNodePtr>, Owner)
 		.Padding(4)
+		.ToolTipText(FText::FromString(Script->Filename))
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center).Padding(0, 0, 8, 0)
@@ -252,21 +267,12 @@ TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPt
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
 				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Script->DisplayName))
-					.ToolTipText(FText::FromString(Script->Filename))
-				]
-				+ SVerticalBox::Slot().AutoHeight()
-				[
-					SNew(STextBlock)
-					.Visibility_Lambda([this, Script] { return EditingScript == Script ? EVisibility::Collapsed : EVisibility::Visible; })
-					.Text(FText::FromString(Script->Source + TEXT(" / ") + Script->RelativePath))
-					.ToolTipText(FText::FromString(Script->Filename))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					// Only the flat list sets a location; in the folder view the folder rows already say where a script lives.
+					VarnPythonTools::MakeNameAndLocation(SNew(STextBlock).Text(FText::FromString(Script->DisplayName)), Node->Location)
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 				[
-					// Replaces the path line while editing; Enter or clicking away saves, Escape cancels.
+					// Appears under the name while editing; Enter or clicking away saves, Escape cancels.
 					SAssignNew(ArgumentsBox, SEditableTextBox)
 					.Visibility_Lambda([this, Script] { return EditingScript == Script ? EVisibility::Visible : EVisibility::Collapsed; })
 					.Text_Lambda([this] { return ArgumentsEditBuffer; })
@@ -317,6 +323,51 @@ TSharedRef<ITableRow> SVarnPythonBrowser::GenerateRow(FVarnPythonBrowserScriptPt
 	return Row;
 }
 
+TSharedRef<ITableRow> SVarnPythonBrowser::GenerateFolderRow(FVarnPythonBrowserNodePtr Node, const TSharedRef<STableViewBase>& Owner)
+{
+	const bool bIsRoot = Node->Kind == VarnPythonTools::FScriptTreeNode::EKind::Root;
+	const FTextBlockStyle& TextStyle = FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>(
+		bIsRoot ? FName("NormalText.Important") : FName("NormalText"));
+
+	return SNew(STableRow<FVarnPythonBrowserNodePtr>, Owner)
+		.Padding(4)
+		.ToolTipText(FText::FromString(Node->Path))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+			[
+				SNew(SImage)
+				.Image_Lambda([this, Node] { return FAppStyle::GetBrush(Tree->IsItemExpanded(Node) ? "Icons.FolderOpen" : "Icons.FolderClosed"); })
+				.ColorAndOpacity(FSlateColor::UseForeground())
+			]
+			+ SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.TextStyle(&TextStyle)
+				.Text(FText::FromString(Node->Name))
+			]
+		];
+}
+
+void SVarnPythonBrowser::GetNodeChildren(FVarnPythonBrowserNodePtr Node, TArray<FVarnPythonBrowserNodePtr>& OutChildren)
+{
+	OutChildren = Node->Children;
+}
+
+void SVarnPythonBrowser::OnExpansionChanged(FVarnPythonBrowserNodePtr Node, bool bExpanded)
+{
+	Expansion.OnExpansionChanged(Node, bExpanded);
+}
+
+FVarnPythonBrowserScriptPtr SVarnPythonBrowser::FindScript(const FVarnPythonBrowserNodePtr& Node) const
+{
+	if (Node->Kind != VarnPythonTools::FScriptTreeNode::EKind::File)
+	{
+		return nullptr;
+	}
+	return ScriptsByKey.FindRef(VarnPythonTools::PathKey(Node->Path));
+}
+
 bool SVarnPythonBrowser::CanRunScripts() const
 {
 	IPythonScriptPlugin* Python = IPythonScriptPlugin::Get();
@@ -326,8 +377,9 @@ bool SVarnPythonBrowser::CanRunScripts() const
 
 TSharedPtr<SWidget> SVarnPythonBrowser::OnContextMenuOpening()
 {
-	const TArray<FVarnPythonBrowserScriptPtr> Selected = ScriptList->GetSelectedItems();
-	if (Selected.IsEmpty())
+	const TArray<FVarnPythonBrowserNodePtr> Selected = Tree->GetSelectedItems();
+	const FVarnPythonBrowserScriptPtr Script = Selected.IsEmpty() ? FVarnPythonBrowserScriptPtr() : FindScript(Selected[0]);
+	if (!Script.IsValid())
 	{
 		return nullptr;
 	}
@@ -337,7 +389,7 @@ TSharedPtr<SWidget> SVarnPythonBrowser::OnContextMenuOpening()
 		LOCTEXT("EditArguments", "Edit Run Arguments..."),
 		LOCTEXT("EditArgumentsTip", "Edit the command-line arguments passed to this script (sys.argv) when it is run."),
 		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
-		FUIAction(FExecuteAction::CreateSP(this, &SVarnPythonBrowser::BeginEditArguments, Selected[0])));
+		FUIAction(FExecuteAction::CreateSP(this, &SVarnPythonBrowser::BeginEditArguments, Script)));
 	return MenuBuilder.MakeWidget();
 }
 
@@ -435,20 +487,17 @@ FReply SVarnPythonBrowser::OnRefreshClicked()
 	return FReply::Handled();
 }
 
-FReply SVarnPythonBrowser::OnSettingsClicked()
+void SVarnPythonBrowser::ToggleFolderView()
 {
-	if (ISettingsModule* Settings = FModuleManager::GetModulePtr<ISettingsModule>(TEXT("Settings")))
-	{
-		Settings->ShowViewer(TEXT("Editor"), TEXT("Plugins"), TEXT("VarnPythonBrowser"));
-	}
-	return FReply::Handled();
+	bShowHierarchy = !bShowHierarchy;
+	FilterScripts();
 }
 
 FText SVarnPythonBrowser::GetSummary() const
 {
 	return FText::Format(
 		LOCTEXT("Count", "{0} of {1} scripts"),
-		FText::AsNumber(FilteredScripts.Num()), FText::AsNumber(AllScripts.Num()));
+		FText::AsNumber(NumShownScripts), FText::AsNumber(AllScripts.Num()));
 }
 
 #undef LOCTEXT_NAMESPACE
