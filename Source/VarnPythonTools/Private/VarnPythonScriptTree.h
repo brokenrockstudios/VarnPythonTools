@@ -15,13 +15,17 @@ namespace VarnPythonTools
 		{
 			Root,
 			Folder,
-			File
+			File,
+			// A saved argument preset, shown under its script. Only the browser creates these.
+			Arguments
 		};
 
 		EKind Kind = EKind::File;
 		FString Name;
-		// Absolute path of the root directory, folder or script.
+		// Absolute path of the root directory, folder or script. For an Arguments node, the script it belongs to.
 		FString Path;
+		// Arguments nodes only: position in the script's list of presets.
+		int32 ArgumentIndex = INDEX_NONE;
 		// Only set in the flat list: the root and folder the script lives in, e.g. "Project / Materials". Empty in the tree.
 		FString Location;
 		TArray<TSharedPtr<FScriptTreeNode>> Children;

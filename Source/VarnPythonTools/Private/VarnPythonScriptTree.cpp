@@ -215,7 +215,9 @@ namespace VarnPythonTools
 			{
 				continue;
 			}
-			if (bExpandAll || ExpandedPaths.Contains(PathKey(Node->Path)))
+			// Searching opens folders, not the argument presets under each matching script.
+			const bool bOpenForSearch = bExpandAll && Node->Kind != FScriptTreeNode::EKind::File;
+			if (bOpenForSearch || ExpandedPaths.Contains(PathKey(Node->Path)))
 			{
 				Tree.SetItemExpansion(Node, true);
 			}

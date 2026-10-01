@@ -30,8 +30,22 @@ namespace
 	using EKind = VarnPythonTools::FScriptTreeNode::EKind;
 }
 
+const FName SVarnPythonEditor::TabName(TEXT("VarnPythonEditor"));
+TWeakPtr<SVarnPythonEditor> SVarnPythonEditor::ActiveEditor;
+
+void SVarnPythonEditor::OpenFile(const FString& Filename)
+{
+	// Spawning a tab constructs the editor right away, so ActiveEditor is set by the time this returns.
+	FGlobalTabmanager::Get()->TryInvokeTab(TabName);
+	if (const TSharedPtr<SVarnPythonEditor> Editor = ActiveEditor.Pin())
+	{
+		Editor->OpenDocument(Filename);
+	}
+}
+
 void SVarnPythonEditor::Construct(const FArguments& InArgs, const TSharedRef<SDockTab>& OwnerTab)
 {
+	ActiveEditor = SharedThis(this);
 	TabManager = FGlobalTabmanager::Get()->NewTabManager(OwnerTab);
 
 	const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("VarnPythonEditorLayout_v1")

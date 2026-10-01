@@ -17,7 +17,7 @@
 namespace
 {
 	const FName PythonBrowserTabName(TEXT("VarnPythonBrowser"));
-	const FName PythonEditorTabName(TEXT("VarnPythonEditor"));
+	const FName& PythonEditorTabName = SVarnPythonEditor::TabName;
 	// The engine's terminal-window glyph (the console variables icon). The app style has no Python icon,
 	// and the Python logo is a trademark, so the tab doesn't use it.
 	const FName PythonBrowserIconName(TEXT("MainFrame.BrowseCVars"));

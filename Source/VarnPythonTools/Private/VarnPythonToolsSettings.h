@@ -6,6 +6,16 @@
 #include "Engine/EngineTypes.h"
 #include "VarnPythonToolsSettings.generated.h"
 
+/** The saved run-argument presets of one script, in display order. */
+USTRUCT()
+struct FVarnPythonArgumentSets
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<FString> Sets;
+};
+
 // No DefaultConfig: these preferences belong in Saved/Config, not Config/Default*.ini.
 UCLASS(Config = EditorPerProjectUserSettings)
 class UVarnPythonToolsSettings : public UObject
@@ -36,9 +46,9 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Filtering", meta = (RelativePath, FilePathFilter = "py"))
 	TArray<FFilePath> IgnoredFiles;
 
-	/** Per-script run arguments, keyed by normalized script path. Edited from the browser's right-click menu, not shown in settings. */
+	/** Per-script run argument presets, keyed by normalized script path. Edited from the browser's right-click menu, not shown in settings. */
 	UPROPERTY(Config)
-	TMap<FString, FString> ScriptArguments;
+	TMap<FString, FVarnPythonArgumentSets> ScriptArgumentSets;
 
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 };

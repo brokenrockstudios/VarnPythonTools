@@ -18,10 +18,9 @@ struct FVarnPythonBrowserScript
 	// Module docstring, read lazily the first time the info tooltip is shown.
 	FString Description;
 	bool bDescriptionLoaded = false;
-	// Command-line arguments passed to the script (sys.argv[1:]). Persisted in UVarnPythonToolsSettings.
-	FString Arguments;
-	// The inline arguments editor for this script's row, if one has been generated.
-	TWeakPtr<SWidget> ArgumentsEditor;
+	// Saved command-line argument presets (sys.argv[1:]), each shown as a run entry under the script.
+	// Persisted in UVarnPythonToolsSettings.
+	TArray<FString> ArgumentSets;
 };
 
 using FVarnPythonBrowserScriptPtr = TSharedPtr<FVarnPythonBrowserScript>;
@@ -43,14 +42,27 @@ private:
 	void OnSearchChanged(const FText& Text);
 	TSharedRef<ITableRow> GenerateRow(FVarnPythonBrowserNodePtr Node, const TSharedRef<STableViewBase>& Owner);
 	TSharedRef<ITableRow> GenerateFolderRow(FVarnPythonBrowserNodePtr Node, const TSharedRef<STableViewBase>& Owner);
+	TSharedRef<ITableRow> GenerateArgumentsRow(FVarnPythonBrowserNodePtr Node, const TSharedRef<STableViewBase>& Owner);
+	// Adds an Arguments child under every script node in Nodes.
+	void AttachArgumentNodes(const TArray<FVarnPythonBrowserNodePtr>& Nodes);
 	void GetNodeChildren(FVarnPythonBrowserNodePtr Node, TArray<FVarnPythonBrowserNodePtr>& OutChildren);
 	void OnExpansionChanged(FVarnPythonBrowserNodePtr Node, bool bExpanded);
-	// The script a file node stands for; null for roots and folders.
+	void OnNodeDoubleClicked(FVarnPythonBrowserNodePtr Node);
+	// The script a file or arguments node stands for; null for roots and folders.
 	FVarnPythonBrowserScriptPtr FindScript(const FVarnPythonBrowserNodePtr& Node) const;
 	TSharedPtr<SWidget> OnContextMenuOpening();
-	void BeginEditArguments(FVarnPythonBrowserScriptPtr Script);
-	void OnArgumentsCommitted(const FText& Text, ETextCommit::Type CommitType, FVarnPythonBrowserScriptPtr Script);
-	FReply RunScript(FVarnPythonBrowserScriptPtr Script);
+	void AddArguments(FVarnPythonBrowserScriptPtr Script);
+	void DuplicateArguments(FVarnPythonBrowserScriptPtr Script, int32 Index);
+	void DeleteArguments(FVarnPythonBrowserScriptPtr Script, int32 Index);
+	void BeginEditArguments(FVarnPythonBrowserScriptPtr Script, int32 Index);
+	void OnArgumentsCommitted(const FText& Text, ETextCommit::Type CommitType, FVarnPythonBrowserScriptPtr Script, int32 Index);
+	// Writes the script's argument presets to the settings.
+	void SaveArguments(const FVarnPythonBrowserScriptPtr& Script);
+	// Rebuilds the tree after the presets changed; the script's row stays open.
+	void RefreshAfterArgumentsChanged(const FVarnPythonBrowserScriptPtr& Script);
+	bool IsEditing(const FVarnPythonBrowserScriptPtr& Script, int32 Index) const;
+	static FString ArgumentEditorKey(const FVarnPythonBrowserScriptPtr& Script, int32 Index);
+	FReply RunScript(FVarnPythonBrowserScriptPtr Script, FString Arguments);
 	FReply OnRefreshClicked();
 	void ToggleFolderView();
 	bool CanRunScripts() const;
@@ -62,8 +74,12 @@ private:
 	TArray<FVarnPythonBrowserNodePtr> RootNodes;
 	TSharedPtr<STreeView<FVarnPythonBrowserNodePtr>> Tree;
 	VarnPythonTools::FScriptTreeExpansion Expansion;
+	// The argument preset being edited inline: EditingIndex in EditingScript's ArgumentSets.
 	FVarnPythonBrowserScriptPtr EditingScript;
+	int32 EditingIndex = INDEX_NONE;
 	FText ArgumentsEditBuffer;
+	// Inline editors of the generated argument rows, by ArgumentEditorKey. Rebuilt along with the rows.
+	TMap<FString, TWeakPtr<SWidget>> ArgumentEditors;
 	FString SearchText;
 	FText RootsTooltip;
 	FText LastResult;

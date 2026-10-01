@@ -22,8 +22,14 @@ public:
 
 	SLATE_END_ARGS()
 
+	/** Id of the nomad tab that hosts the editor. */
+	static const FName TabName;
+
 	void Construct(const FArguments& InArgs, const TSharedRef<SDockTab>& OwnerTab);
 	virtual ~SVarnPythonEditor() override;
+
+	/** Opens the editor tab if it isn't open, then opens the script in it. */
+	static void OpenFile(const FString& Filename);
 
 private:
 	TSharedRef<SWidget> MakeExplorerPanel();
@@ -40,6 +46,9 @@ private:
 
 	void OpenDocument(const FString& Filename);
 	void OnDocumentClosed(TSharedRef<SDockTab> Tab, FString Key);
+
+	// The editor in the open editor tab, if any, for OpenFile.
+	static TWeakPtr<SVarnPythonEditor> ActiveEditor;
 
 	TSharedPtr<FTabManager> TabManager;
 	TSharedPtr<STreeView<FVarnPythonEditorNodePtr>> Tree;
