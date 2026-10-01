@@ -85,6 +85,6 @@ private:
 	FText LastResult;
 	int32 NumShownScripts = 0;
 	// Folder hierarchy when true, a flat list of every script when false.
-	bool bShowHierarchy = false;
+	bool bShowHierarchy = true;
 	bool bRunning = false;
 };

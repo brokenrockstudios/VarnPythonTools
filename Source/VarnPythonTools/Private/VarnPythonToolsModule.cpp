@@ -33,15 +33,17 @@ public:
 			return;
 		}
 
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(PythonBrowserTabName,
-		                                                  FOnSpawnTab::CreateRaw(this, &FVarnPythonToolsModule::SpawnTab))
+		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+			                        PythonBrowserTabName,
+			                        FOnSpawnTab::CreateRaw(this, &FVarnPythonToolsModule::SpawnTab))
 		                        .SetDisplayName(LOCTEXT("Title", "Varn Python Browser"))
 		                        .SetTooltipText(LOCTEXT("TabTip", "Browse and run Python scripts."))
 		                        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), PythonBrowserIconName))
 		                        .SetMenuType(ETabSpawnerMenuType::Hidden);
 
-		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(PythonEditorTabName,
-		                                                  FOnSpawnTab::CreateRaw(this, &FVarnPythonToolsModule::SpawnEditorTab))
+		FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+			                        PythonEditorTabName,
+			                        FOnSpawnTab::CreateRaw(this, &FVarnPythonToolsModule::SpawnEditorTab))
 		                        .SetDisplayName(LOCTEXT("EditorTitle", "Python Editor"))
 		                        .SetTooltipText(LOCTEXT("EditorTabTip", "Browse Python scripts and open them in tabs."))
 		                        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("MainFrame.OpenSourceCodeEditor")))
@@ -49,13 +51,15 @@ public:
 		FTabManager::RegisterDefaultTabWindowSize(FTabId(PythonEditorTabName), FVector2D(1100, 700));
 
 		ISettingsModule& Settings = FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings"));
-		Settings.RegisterSettings(TEXT("Editor"), TEXT("Plugins"), TEXT("VarnPythonBrowser"),
-		                          LOCTEXT("SettingsTitle", "Varn Python Browser"),
-		                          LOCTEXT("SettingsDescription", "Personal Python script folders for this project. Refresh the browser after editing."),
-		                          GetMutableDefault<UVarnPythonToolsSettings>());
+		Settings.RegisterSettings(
+			TEXT("Editor"), TEXT("Plugins"), TEXT("VarnPythonBrowser"),
+			LOCTEXT("SettingsTitle", "Varn Python Browser"),
+			LOCTEXT("SettingsDescription", "Personal Python script folders for this project. Refresh the browser after editing."),
+			GetMutableDefault<UVarnPythonToolsSettings>());
 
-		UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(
-			this, &FVarnPythonToolsModule::RegisterMenus));
+		UToolMenus::RegisterStartupCallback(
+			FSimpleMulticastDelegate::FDelegate::CreateRaw(
+				this, &FVarnPythonToolsModule::RegisterMenus));
 	}
 
 	virtual void ShutdownModule() override
@@ -85,35 +89,44 @@ public:
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(PythonEditorTabName);
 		FTabManager::UnregisterDefaultTabWindowSize(FTabId(PythonEditorTabName));
 	}
-
 private:
 	void RegisterMenus()
 	{
 		FToolMenuOwnerScoped Owner(this);
 		UToolMenu* Menu = UToolMenus::Get()->ExtendMenu(TEXT("LevelEditor.MainMenu.Window"));
 		FToolMenuSection& Section = Menu->FindOrAddSection(TEXT("VarnPythonBrowser"), LOCTEXT("Section", "Python"), FToolMenuInsert());
-		Section.AddMenuEntry(PythonBrowserTabName,
-		                     LOCTEXT("Title", "Varn Python Browser"),
-		                     LOCTEXT("MenuTip", "Browse and run Python scripts."),
-		                     FSlateIcon(FAppStyle::GetAppStyleSetName(), PythonBrowserIconName),
-		                     FUIAction(FExecuteAction::CreateLambda([]
-		                     {
-			                     FGlobalTabmanager::Get()->TryInvokeTab(PythonBrowserTabName);
-		                     })));
-		Section.AddMenuEntry(PythonEditorTabName,
-		                     LOCTEXT("EditorTitle", "Python Editor"),
-		                     LOCTEXT("EditorMenuTip", "Browse Python scripts and open them in tabs."),
-		                     FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("MainFrame.OpenSourceCodeEditor")),
-		                     FUIAction(FExecuteAction::CreateLambda([]
-		                     {
-			                     FGlobalTabmanager::Get()->TryInvokeTab(PythonEditorTabName);
-		                     })));
+		Section.AddMenuEntry(
+			PythonBrowserTabName,
+			LOCTEXT("Title", "Varn Python Browser"),
+			LOCTEXT("MenuTip", "Browse and run Python scripts."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), PythonBrowserIconName),
+			FUIAction(
+				FExecuteAction::CreateLambda(
+					[]
+					{
+						FGlobalTabmanager::Get()->TryInvokeTab(PythonBrowserTabName);
+					})));
+		Section.AddMenuEntry(
+			PythonEditorTabName,
+			LOCTEXT("EditorTitle", "Python Editor"),
+			LOCTEXT("EditorMenuTip", "Browse Python scripts and open them in tabs."),
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), TEXT("MainFrame.OpenSourceCodeEditor")),
+			FUIAction(
+				FExecuteAction::CreateLambda(
+					[]
+					{
+						FGlobalTabmanager::Get()->TryInvokeTab(PythonEditorTabName);
+					})));
 	}
 
 	TSharedRef<SDockTab> SpawnTab(const FSpawnTabArgs& Args)
 	{
 		TSharedRef<SDockTab> Tab = SNew(SDockTab)
 			.TabRole(ETabRole::NomadTab)
+			[
+				SNew(SVarnPythonBrowser)
+			]
+			.Label(LOCTEXT("TabLabel", "Varn PyBrowser"))
 			[
 				SNew(SVarnPythonBrowser)
 			];
